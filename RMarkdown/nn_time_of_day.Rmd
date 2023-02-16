@@ -30,7 +30,7 @@ Le but ici est d'extraire des *features* à partir de l'information sur l'heure 
 ```{r}
 JeuDonnees_train <- tar_read(JeuDonnees_train)
 data_nn <- JeuDonnees_train$nn_data
-
+# test
 names(data_nn)
 ```
 
