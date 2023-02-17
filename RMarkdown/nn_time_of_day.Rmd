@@ -30,7 +30,7 @@ Le but ici est d'extraire des *features* à partir de l'information sur l'heure 
 ```{r}
 JeuDonnees_train <- tar_read(JeuDonnees_train)
 data_nn <- JeuDonnees_train$nn_data
-# test
+
 names(data_nn)
 ```
 
@@ -220,6 +220,70 @@ Avec la librairie `luz`, cependant, plus besoin de faire la double boucle. On a 
 
 
 ## TEST
+
+```{r}
+Metrics <- R6Class(
+  classname = "Metrics",
+  
+  public = 
+    list(
+      mse = function() {mean((self$target - self$preds) ^ 2)},
+      rmse = function() {sqrt(self$mse())},
+      print_metrics = function() {
+        cat("MSE = ", self$mse(), "\n")
+        cat("RMSE = ", self$rmse())
+      }
+    )
+)
+```
+
+
+```{r}
+LinReg <- R6Class(
+  classname = "LinReg",
+  inherit = Metrics,
+  
+   public =
+    list(
+      data = NULL,
+      fitted = NULL,
+      target = NULL,
+      preds = NULL,
+
+      initialize = function(data) {
+        self$data <- data
+        self$target <- data$y
+      },
+      
+      fit = function() {self$fitted <- lm(x ~ y, data = self$data)},
+      predict = function(data) {self$preds <- predict(self$fitted, type = "response", newdata = data)}
+    )
+)
+```
+
+```{r}
+aaa <- LinReg$new(diamonds)
+```
+
+
+```{r}
+aaa$fit()
+```
+
+
+```{r}
+aaa$predict(diamonds)
+```
+
+```{r}
+aaa$rmse()
+```
+
+```{r}
+aaa$print_metrics()
+```
+
+
 ```{r}
 NeuralNet <- R6Class(
   
@@ -230,16 +294,16 @@ NeuralNet <- R6Class(
       model_spec = NULL,
       train_ds = NULL,
       valid_ds = NULL,
+      test_ds = NULL,
       train_dl = NULL,
       valid_dl = NULL,
       fitted = NULL,
       
-      
-      
-      initialize = function(model_spec, train_ds, valid_ds) {
+      initialize = function(model_spec, train_ds, valid_ds, test_ds) {
         self$model_spec <- model_spec
         self$train_ds <- train_ds
         self$valid_ds <- valid_ds
+        self$test_ds <- test_ds
         
         self$train_dl <- dataloader(train_ds, batch_size = 128, shuffle = F)
         self$valid_dl <- dataloader(valid_ds, batch_size = 128, shuffle = F)
@@ -261,34 +325,59 @@ NeuralNet <- R6Class(
         invisible(self)
       },
       
-      test = function(test_ds) {
-        preds <- as.double(self$fitted$model$forward(test_ds[1:length(test_ds)]$x))
-        preds_naif <- rep(mean(as.numeric(torch_cat(list(train_ds$y, valid_ds$y)))), length(test_ds))
+      test = function() {
+        preds <- as.double(self$fitted$model$forward(self$test_ds[1:length(test_ds)]$x))
+        preds_naif <- rep(mean(as.numeric(torch_cat(list(train_ds$y, valid_ds$y)))), length(self$test_ds))
         
-        truth_numeric <- as.double(test_ds$y)
+        truth_numeric <- as.double(self$test_ds$y)
         truth_factor <- factor(truth_numeric, levels = c("1", "0"))
         
         mse = rmse_vec(truth = truth_numeric, estimate = preds) ^ 2
-        mse_naif <- rmse_vec(truth = truth_numeric, estimate = preds_naif) ^ 2; print(mse_naif)
+        mse_naif <- rmse_vec(truth = truth_numeric, estimate = preds_naif) ^ 2
         
         list(
           auroc = roc_auc_vec(truth = truth_factor, estimate = preds),
           mse = mse,
-          mse_skill = mse / mse_naif - 1
+          mse_skill = 1 - mse / mse_naif
         )
+      },
+      
+      plot_training = function() {
+        train_loss <- self$fitted$records$metrics$train %>% map("loss") %>% flatten_dbl()
+        train_auc <- self$fitted$records$metrics$train %>% map("auc") %>% flatten_dbl()
+        
+        valid_loss <- self$fitted$records$metrics$valid %>% map("loss") %>% flatten_dbl()
+        valid_auc <- self$fitted$records$metrics$valid %>% map("auc") %>% flatten_dbl()
+        
+        epochs <- seq_along(train_loss)
+        
+        dat <- 
+          tibble(
+            epochs,
+            train_loss,
+            train_auc,
+            valid_loss,
+            valid_auc
+          ) %>% 
+          pivot_longer(cols = -"epochs") %>% 
+          separate(col = "name", into = c("dataset", "metric"), sep = "_")
+        
+        ggplot(dat, aes(x = epochs, y = value, col = dataset)) +
+          geom_point(shape = 21) +
+          geom_line() +
+          scale_color_discrete(name = NULL) +
+          ylab(NULL) +
+          facet_grid(vars(metric), scales = "free_y")
       }
-      
-      
-      
-
-  )
+    )
 )
 ```
 
 ```{r}
-net <- NeuralNet$new(classif_mlp, train_ds, valid_ds)
+net <- NeuralNet$new(classif_mlp, train_ds, valid_ds, test_ds)
 net$fit()
-net$test(test_ds)
+net$test()
+# net$plot_training()
 ```
 
 ### FIN TEST
