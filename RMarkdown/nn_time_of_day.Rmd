@@ -140,7 +140,7 @@ J'ai défini un perceptron assez de base pour commencer: on pourra subséquemmen
 -   la troisième couche cachée transforme le vecteur de dimension 8 en vecteur de dimension 2 (avec une matrice de poids 8 x 2 et un vecteur de biais de dimension 2);
 -   la quatrième couche cachée transforme le vecteur de dimension 2 en vecteur de dimension 1 (avec une matrice de poids 2 x 1 et un vecteur de biais de dimension 1);
 
-Finalement, tout de suite après avoir appliqué la troisième couche, on applique la fonction sigmoide afin d'obtenir une probabilité entre 0 et 1. Noter qu'on a également ajouté une « skip connection » pour la distance totale conduite.
+Finalement, tout de suite après avoir appliqué la troisième couche, on applique la fonction sigmoide afin d'obtenir une probabilité entre 0 et 1. Noter qu'on a également ajouté une « **skip connection** » pour la distance totale conduite.
 
 Ici, on définit la classe `classif_mlp`, qui permet de de créer des instances de réseaux de neurones avec l'architecture donnée. La méthode `initialize` permet de définir les couches, tandis que la méthode `forward` permet de produire l'output entre 0 et 1 avec l'input x, qui est un vecteur de dimension 24. Puisqu'on est intéressés à faire du « representation learning » (c'est-à-dire trouver une bonne représentation en moins de dimensions de notre vecteur d'input), j'ai aussi ajouté une méthode `extract_embedding`, qui permet d'accéder à la dernière couche cachée et donc de représenter l'input en 2 dimensions. Ce qu'on fait est donc en fait de la réduction de dimension, mais hautement non-linéaire.
 
@@ -216,88 +216,55 @@ modele$extract_embedding(input)
 
 Traditionnellement, en `torch`, on va programmer nous-mêmes la double boucle qui va permettre d'entrainer le réseau. C'est une boucle double parce qu'on itère sur toutes les batches du jeu de données et on passe plusieurs fois sur le jeu de données (epochs). On va donc à chaque itération faire une passe « forward » pour obtenir la valeur de la fonction de perte, faire la rétropropagation pour calculer le gradient et mettre à jour les paramètres avec l'optimiseur choisi.
 
-Avec la librairie `luz`, cependant, plus besoin de faire la double boucle. On a qu'à d'abord utiliser la fonction `luz::setup` pour spécifier comment on veut entrainer et évaluer le modèle. On doit d'abord choisir la fonction de perte, qui est la plupart du temps l'entropie croisée binaire dans un contexte de classification binaire. On choisit ensuite l'optimiseur, qui correspond à la manière de mettre à jour les paramètres une fois le gradient calculé. Le plus simple est l'optimiseur « SGD » (stochastic gradient descent), qui va simplement mettre à jour les paramètres en soustrayant des paramètres courants le gradient multiplié par un taux d'apprentissage préalablement choisi. Ici, j'ai choisi « Adam », qui est très populaire et fonctionne habituellement mieux que le « SGD ». Finalement, on spécifie comment on veut évaluer la performance du modèle. Ici, j'ai choisi l'AUC. On va ensuite passer tout ça à la fonction `luz::fit`, qui va entrainer le modèle. On doit spécifier sur quel jeu de données on veut l'entrainer, sur quel jeu de données on veut l'évaluer et le nombre d'epochs (combien de fois on « passe » sur le jeu de données).
+Avec la librairie `luz`, cependant, plus besoin de faire la double boucle. On a qu'à d'abord utiliser la fonction `luz::setup` pour spécifier comment on veut entrainer et évaluer le modèle. On doit d'abord choisir la fonction de perte, qui est la plupart du temps l'entropie croisée binaire dans un contexte de classification binaire. On choisit ensuite l'optimiseur, qui correspond à la manière de mettre à jour les paramètres une fois le gradient calculé. Le plus simple est l'optimiseur « SGD » (stochastic gradient descent), qui va simplement mettre à jour les paramètres en soustrayant des paramètres courants le gradient multiplié par un taux d'apprentissage préalablement choisi. Ici, j'ai choisi « Adam », qui est très populaire et fonctionne habituellement mieux que le « SGD ». Finalement, on spécifie comment on veut évaluer la performance du modèle. Ici, j'ai choisi l'AUROC et le MSE (aussi appelé « Brier score »). On va ensuite passer tout ça à la fonction `luz::fit`, qui va entrainer le modèle. On doit spécifier sur quel jeu de données on veut l'entrainer, sur quel jeu de données on veut l'évaluer et le nombre d'epochs (combien de fois on « passe » sur le jeu de données).
 
-
-## TEST
+Je me fais d'abord 2 classes R6. La première, `ClassifMetrics`, sert à calculer les métriques sur un ensemble test alors que `NeuralNet` sert à entrainer le réseau (entre autres):
 
 ```{r}
-Metrics <- R6Class(
-  classname = "Metrics",
+ClassifMetrics <- R6Class(
+  classname = "ClassifMetrics",
   
   public = 
     list(
-      mse = function() {mean((self$target - self$preds) ^ 2)},
-      rmse = function() {sqrt(self$mse())},
+      mse = function() mean((self$test_targets - self$test_preds) ^ 2),
+      
+      brier_skill = function() {
+        preds_naif <- rep(mean(self$train_targets), length(self$test_targets))
+        mse_naif <- mean((self$test_targets - preds_naif) ^ 2)
+        1 - self$mse() / mse_naif
+      },
+      
+      auroc = function() roc_auc_vec(truth = factor(self$test_targets, levels = c("1", "0")), estimate = self$test_preds),
+      
       print_metrics = function() {
-        cat("MSE = ", self$mse(), "\n")
-        cat("RMSE = ", self$rmse())
+        cat("AUROC = ", round(self$auroc(), 4), "\n")
+        cat("Brier score = ", round(self$mse(), 4), "\n")
+        cat("Brier score skill = ", round(self$brier_skill(), 4), "\n")
       }
     )
 )
 ```
 
-
-```{r}
-LinReg <- R6Class(
-  classname = "LinReg",
-  inherit = Metrics,
-  
-   public =
-    list(
-      data = NULL,
-      fitted = NULL,
-      target = NULL,
-      preds = NULL,
-
-      initialize = function(data) {
-        self$data <- data
-        self$target <- data$y
-      },
-      
-      fit = function() {self$fitted <- lm(x ~ y, data = self$data)},
-      predict = function(data) {self$preds <- predict(self$fitted, type = "response", newdata = data)}
-    )
-)
-```
-
-```{r}
-aaa <- LinReg$new(diamonds)
-```
-
-
-```{r}
-aaa$fit()
-```
-
-
-```{r}
-aaa$predict(diamonds)
-```
-
-```{r}
-aaa$rmse()
-```
-
-```{r}
-aaa$print_metrics()
-```
-
-
 ```{r}
 NeuralNet <- R6Class(
-  
   classname = "NeuralNet",
+  inherit = ClassifMetrics,
   
   public =
     list(
       model_spec = NULL,
+      
       train_ds = NULL,
       valid_ds = NULL,
       test_ds = NULL,
-      train_dl = NULL,
-      valid_dl = NULL,
+      
       fitted = NULL,
+      
+      test_preds = NULL,
+      
+      train_targets = NULL,
+      test_targets = NULL,
+      
       
       initialize = function(model_spec, train_ds, valid_ds, test_ds) {
         self$model_spec <- model_spec
@@ -305,11 +272,14 @@ NeuralNet <- R6Class(
         self$valid_ds <- valid_ds
         self$test_ds <- test_ds
         
-        self$train_dl <- dataloader(train_ds, batch_size = 128, shuffle = F)
-        self$valid_dl <- dataloader(valid_ds, batch_size = 128, shuffle = F)
+        self$test_targets <- as.numeric(test_ds$y)
+        self$train_targets <- as.numeric(train_ds$y)
       },
       
-      fit = function(nb_epochs = 1) {
+      train = function(nb_epochs = 1) {
+        train_dl <- dataloader(train_ds, batch_size = 128, shuffle = F)
+        valid_dl <- dataloader(valid_ds, batch_size = 128, shuffle = F)
+        
         self$fitted <- 
           self$model_spec %>%
           setup(
@@ -318,51 +288,28 @@ NeuralNet <- R6Class(
             metrics = list(luz_metric_binary_auroc(thresholds = seq(0, 0.5, by = 0.0005)), luz_metric_mse())
           ) %>%
           luz::fit(
-            self$train_dl, 
+            train_dl, 
             epochs = nb_epochs, 
-            valid_data = self$valid_dl
+            valid_data = valid_dl
           )
         invisible(self)
       },
       
-      test = function() {
-        preds <- as.double(self$fitted$model$forward(self$test_ds[1:length(test_ds)]$x))
-        preds_naif <- rep(mean(as.numeric(torch_cat(list(train_ds$y, valid_ds$y)))), length(self$test_ds))
-        
-        truth_numeric <- as.double(self$test_ds$y)
-        truth_factor <- factor(truth_numeric, levels = c("1", "0"))
-        
-        mse = rmse_vec(truth = truth_numeric, estimate = preds) ^ 2
-        mse_naif <- rmse_vec(truth = truth_numeric, estimate = preds_naif) ^ 2
-        
-        list(
-          auroc = roc_auc_vec(truth = truth_factor, estimate = preds),
-          mse = mse,
-          mse_skill = 1 - mse / mse_naif
-        )
+      predict = function() {
+        self$test_preds <- as.double(self$fitted$model$forward(self$test_ds[1:length(self$test_ds)]$x))
       },
       
       plot_training = function() {
-        train_loss <- self$fitted$records$metrics$train %>% map("loss") %>% flatten_dbl()
-        train_auc <- self$fitted$records$metrics$train %>% map("auc") %>% flatten_dbl()
-        
-        valid_loss <- self$fitted$records$metrics$valid %>% map("loss") %>% flatten_dbl()
-        valid_auc <- self$fitted$records$metrics$valid %>% map("auc") %>% flatten_dbl()
-        
-        epochs <- seq_along(train_loss)
-        
-        dat <- 
-          tibble(
-            epochs,
-            train_loss,
-            train_auc,
-            valid_loss,
-            valid_auc
-          ) %>% 
-          pivot_longer(cols = -"epochs") %>% 
-          separate(col = "name", into = c("dataset", "metric"), sep = "_")
-        
-        ggplot(dat, aes(x = epochs, y = value, col = dataset)) +
+        tibble(
+          train_loss = self$fitted$records$metrics$train %>% map("loss") %>% flatten_dbl(),
+          train_auc = self$fitted$records$metrics$train %>% map("auc") %>% flatten_dbl(),
+          valid_loss = self$fitted$records$metrics$valid %>% map("loss") %>% flatten_dbl(),
+          valid_auc = self$fitted$records$metrics$valid %>% map("auc") %>% flatten_dbl()
+        ) %>%
+        mutate(epochs = seq_along(train_loss)) %>% 
+        pivot_longer(cols = -"epochs") %>%
+        separate(col = "name", into = c("dataset", "metric"), sep = "_") %>% 
+        ggplot(aes(x = epochs, y = value, col = dataset)) +
           geom_point(shape = 21) +
           geom_line() +
           scale_color_discrete(name = NULL) +
@@ -373,111 +320,52 @@ NeuralNet <- R6Class(
 )
 ```
 
+On peut maintenant créer une nouvelle instance de NeuralNet et l'entrainer:
+
 ```{r}
 net <- NeuralNet$new(classif_mlp, train_ds, valid_ds, test_ds)
-net$fit()
-net$test()
-# net$plot_training()
+net$train(nb_epochs = 30)
 ```
 
-### FIN TEST
+## Performance sur l'ensemble test
 
+On obtient les prédictions sur l'ensemble test et on obtient ensuite les métriques. Le Brier score est la même chose que le MSE et le Brier score skill est l'amélioration du MSE par rapport au modèle naïf qui prédit la proportion de cas positifs du jeu d'entrainement pour toutes les observations de l'ensemble test.
 
 ```{r}
-nb_epochs <- 2
-set.seed(2023)
-fit <- 
-  classif_mlp %>%
-  setup(
-    loss = nnf_binary_cross_entropy,
-    optimizer = optim_adam,
-    metrics = list(luz_metric_binary_auroc(thresholds = seq(0, 0.5, by = 0.0005)), luz_metric_mse())
-  ) %>%
-  luz::fit(
-    train_dl, 
-    epochs = nb_epochs, 
-    valid_data = valid_dl
-  )
+net$predict()
+net$print_metrics()
 ```
+
+Voici comment on pourrait améliorer les résultats:
+
+- Plus d'épochs
+- Plus de régularization (p. ex., dropout). On sait que les perceptrons complexes et bien régularisés tendent à bien performer.
+- Batch normalization (normaliser les features avant chaque couche cachée).
+- Calibration des hyperparamètres: learning rate (le plus important), fonction d'activation, nombre de neurones cachés, nombre de couches cachées.
+- Ajouter l'information de la distance, vitesse moyenne et vitesse max dans chaqeu heure de la journée.
+
 
 ## Visualiser le processus d'entrainement
 
 Une fois le réseau entrainé, on peut visualiser le processus d'entrainement. Les performances sur l'ensemble d'entrainement et de validation sont stockées dans l'objet `fit$records$metrics`:
 
 ```{r}
-plot_training <- function(fit) {
-  train_loss <- fit$records$metrics$train %>% map("loss") %>% flatten_dbl()
-  train_auc <- fit$records$metrics$train %>% map("auc") %>% flatten_dbl()
-  
-  valid_loss <- fit$records$metrics$valid %>% map("loss") %>% flatten_dbl()
-  valid_auc <- fit$records$metrics$valid %>% map("auc") %>% flatten_dbl()
-  
-  epochs <- seq_along(train_loss)
-  
-  dat <- 
-    tibble(
-      epochs,
-      train_loss,
-      train_auc,
-      valid_loss,
-      valid_auc
-    ) %>% 
-    pivot_longer(cols = -"epochs") %>% 
-    separate(col = "name", into = c("dataset", "metric"), sep = "_")
-  
-  ggplot(dat, aes(x = epochs, y = value, col = dataset)) +
-    geom_point(shape = 21) +
-    geom_line() +
-    scale_color_discrete(name = NULL) +
-    ylab(NULL) +
-    facet_grid(vars(metric), scales = "free_y")
-}
+net$plot_training()
 ```
-
-```{r}
-plot_training(fit)
-```
-
-On voit qu'on obtient une AUC de `r fit$records$metrics$valid %>% map("auc") %>% flatten_dbl() %>% tail(n=1)` après `r nb_epochs` épochs. Voici comment on pourrait améliorer les résultats:
-
-- Plus d'épochs
-- Plus de régularization (p. ex., dropout). On sait que les perceptrons complexes et bien régularisés tendent à bien performer.
-- Batch normalization (normaliser les features avant chaque couche cachée).
-- Calibration des hyperparamètres: learning rate (le plus important), fonction d'activation, nombre de neurones cachés, nombre de couches cachées.
-
-## Performance sur l'ensemble test
-
-On peut également tester le modèle sur l'ensemble test, avec:
-
-```{r}
-evaluation <- fit %>% evaluate(data = test_dl)
-metrics <- get_metrics(evaluation)
-print(evaluation)
-```
-
-Ou, de manière équivalente, avec:
-
-```{r}
-preds <- as.double(fit$model$forward(test_ds[1:7500]$x))
-truth <- factor(as.double(test_ds$y), levels = c("1", "0"))
-(res <- roc_auc_vec(truth = truth, estimate = preds))
-```
-
-On obtient donc une AUC de `r res` sur l'ensemble test.
 
 ## Extraire les embeddings
 
 En entrainant un perceptron, le but est d'extraire des *features* utiles pour prédire les réclamations à partir des vecteurs de dimension 24 qui caractérisent chacun des véhicules. Ces features sont aussi appelées des *embeddings* et correspondent à une représentation en moins de dimensions du vecteur de dimension 24. Ici, la dernière couche cachée a 2 neurones, donc notre embedding sera en 2 dimensions. Pour obtenir cet embedding, on doit « couper la tête » du réseau, ce que j'ai fait avec la méthode `extract_embedding` de la classe `classif_mlp`. Pour obtenir l'embedding d'un véhicule donné, on va simplement prendre son vecteur x (dimension 24) et le passer dans la méthode `extract_embedding` du perceptron entrainé. Par exemple, on peut obtenir le embedding du premier véhicule avec:
 
 ```{r}
-(emb_premier_veh <- fit$model$extract_embedding(train_ds[1]$x))
+(emb_premier_veh <- net$fitted$model$extract_embedding(train_ds[1]$x))
 ```
 On va maintenant obtenir les embeddings pour tous les véhicules des 3 bases train, valid et test:
 
 ```{r}
-emb_train <- fit$model$extract_embedding(train_ds[1:25000]$x) %>% as.matrix() %>% as_tibble()
-emb_valid <- fit$model$extract_embedding(valid_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
-emb_test <- fit$model$extract_embedding(test_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
+emb_train <- net$fitted$model$extract_embedding(train_ds[1:25000]$x) %>% as.matrix() %>% as_tibble()
+emb_valid <- net$fitted$model$extract_embedding(valid_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
+emb_test <- net$fitted$model$extract_embedding(test_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
 ```
 
 ```{r}
@@ -504,135 +392,182 @@ test <- emb_test %>% bind_cols(test_df["claim_ind_cov_1_2_3_4_5_6"])
 
 ## Seulement les embeddings
 
+```{r}
+ClassifGLM <- R6Class(
+  classname = "ClassifGLM",
+  inherit = ClassifMetrics,
+  
+  public = list(
+    train = NULL,
+    test = NULL,
+    response = NULL,
+    fitted = NULL,
+    recipe = NULL,
+    test_targets = NULL,
+    train_targets = NULL,
+    
+    test_preds = NULL,
+    
+    initialize = function(train, test, response) {
+      self$train <- train
+      self$test <- test
+      self$response <- response
+      self$recipe <-
+          recipe(as.formula(glue("{self$response} ~ .")), data = self$train) %>%
+          step_other(all_nominal_predictors(), threshold = 0.05) %>%
+          step_lencode_glm(all_nominal_predictors(), outcome = self$response) %>%
+          step_impute_bag(all_predictors()) %>%
+          step_YeoJohnson(all_numeric_predictors()) %>%
+          step_normalize(all_numeric_predictors())
+      self$test_targets <- as.numeric(test[[response]]) - 1
+      self$train_targets <- as.numeric(train[[response]]) - 1
+    },
+    
+    fit = function() {
+      logistic_reg_glm_spec <-
+        logistic_reg() %>%
+        set_engine("glm")
+
+      wf <-
+        workflow() %>%
+        add_model(logistic_reg_glm_spec) %>%
+        add_recipe(self$recipe)
+
+      self$fitted <- parsnip::fit(wf, data = self$train)
+      invisible(self)
+    },
+    
+    predict = function() self$test_preds <- predict(self$fitted, new_data = self$test, type = "prob")$.pred_1
+  )
+)
+```
+
 Testons une régression logistique avec seulement les embeddings comme prédicteurs. On entraine d'abord sur l'ensemble `train`:
 
 ```{r}
-glm_fit <- glm(claim_ind_cov_1_2_3_4_5_6 ~ ., family = binomial, data = train)
+glm_mod <- ClassifGLM$new(train = train, test = bind_rows(valid, test), response = "claim_ind_cov_1_2_3_4_5_6")
+glm_mod$fit()
 ```
 
 Et on évalue sur les ensemble `valid` et `test`:
 
 ```{r}
-glm_preds_valid <- predict(glm_fit, newdata = valid, type = "response")
-glm_preds_test <- predict(glm_fit, newdata = test, type = "response")
+glm_mod$predict()
+glm_mod$print_metrics()
 ```
-
-**AUROC**
-```{r}
-truth_valid <- factor(valid$claim_ind_cov_1_2_3_4_5_6, levels = c("1", "0"))
-truth_test <- factor(test$claim_ind_cov_1_2_3_4_5_6, levels = c("1", "0"))
-
-roc_auc_vec(truth_valid, glm_preds_valid) # AUC valid
-roc_auc_vec(truth_test, glm_preds_test) # AUC test
-```
-
-**Brier score**
 
 
 ## GLMNET embeddings + variables classiques + distance
 
 Testons maintenant une régression glmnet avec les embeddings en plus des variables classiques + distance. Créons-nous d'abord une classe R6 pour faciliter la calibration et l'entrainement des modèles elastic-net:
 
+
 ```{r}
 ClassifElasNet <- R6Class(
-  
   classname = "ClassifElasNet",
+  inherit = ClassifMetrics,
   
-  public =
-    list(
-      data = NULL,
-      response = NULL,
-      tune_res = NULL,
-      best_params = NULL,
-      final_wf = NULL,
-      fitted = NULL,
-      
-      initialize = function(data, response) {
-        self$data <- data
-        self$response <- response
-      },
-      
-      tune = function() {
-        tune_spec <- logistic_reg(engine = "glmnet", penalty = tune(), mixture = tune())
-        resamples <- vfold_cv(self$data, v = 4, strata = all_of(self$response))
-        formula <- as.formula(glue("{self$response} ~ ."))
-        grid <- grid_regular(penalty(), mixture(), levels = c(50, 5))
-        recipe <-
-          recipe(formula, data = self$data) %>%
+  public = list(
+    train = NULL,
+    test = NULL,
+    response = NULL,
+    fitted = NULL,
+    recipe = NULL,
+    test_targets = NULL,
+    train_targets = NULL,
+    
+    tune_res = NULL,
+    best_params = NULL,
+    final_wf = NULL,
+    
+    test_preds = NULL,
+    
+    initialize = function(train, test, response) {
+      self$train <- train
+      self$test <- test
+      self$response <- response
+      self$recipe <-
+          recipe(as.formula(glue("{self$response} ~ .")), data = self$train) %>%
           step_other(all_nominal_predictors(), threshold = 0.05) %>%
           step_lencode_glm(all_nominal_predictors(), outcome = self$response) %>%
           step_impute_bag(all_predictors()) %>%
-          step_YeoJohnson(all_numeric_predictors()) %>% 
+          step_YeoJohnson(all_numeric_predictors()) %>%
           step_normalize(all_numeric_predictors())
-        
-        wf <-
-          workflow() %>%
-          add_model(tune_spec) %>%
-          add_recipe(recipe)
-        
-        tuning <- 
-          tune_grid(
-            wf,
-            resamples = resamples,
-            grid = grid,
-            metrics = metric_set(roc_auc, accuracy, sensitivity, specificity),
-            control = control_grid(save_pred = F)
-          )
-        
-        self$tune_res <- tuning
-        self$best_params <- tuning %>% select_best(metric = "roc_auc") %>% select(penalty, mixture)
-        self$final_wf <- wf %>% finalize_workflow(self$best_params)
-        invisible(self)
-      },
-      
-      fit = function() {
-        self$fitted <- parsnip::fit(self$final_wf, data = self$data)
-        invisible(self)
-      },
-      
-      plot_coefs = function() {
-        df <- 
-          self$fitted %>% 
-          extract_fit_parsnip() %>% 
-          tidy() %>% 
-          filter(term != "(Intercept)")
-        
-        df_non_zero <- 
-          df %>% 
-          filter(estimate != 0)
-        
-        nb_zero_coef <- nrow(df) - nrow(df_non_zero)
+      self$test_targets <- as.numeric(test[[response]]) - 1
+      self$train_targets <- as.numeric(train[[response]]) - 1
+    },
     
-        df_non_zero %>% 
-          mutate(Sign = if_else(estimate > 0, "+", "-")) %>% 
-          mutate(abs_estimate = abs(estimate)) %>% 
-          mutate(term = fct_reorder(term, abs_estimate)) %>% 
-          ggplot(aes(x = term, y = abs_estimate, fill = Sign)) +
-          geom_col(alpha = 0.7) +
-          xlab(NULL) +
-          ylab("Absolute value of coefficient") +
-          scale_fill_manual(values = c("#a61d21", "#00743F")) +
-          coord_flip() +
-          labs(caption = glue("Note: {nb_zero_coef} other coefficients are zero"))
-      },
-      
-      get_preds = function(data) {
-        predict(self$fitted, new_data = data, type = "prob")$.pred_1
-      },
-      
-      get_auc = function(data) {
-        truth <- data[[self$response]]
-        preds <- self$get_preds(data)
-        roc_auc_vec(truth, 1 - preds)
-      },
-      
-      print = function() {
-        cat("Régression logistique avec régularisation elastic-net \n\n")
-        cat("\t", nrow(self$data), " observations\n\n", sep = "")
-        cat("\tVariable réponse: ", self$response, "\n\n", sep = "")
-        cat("\tPrédicteurs:\n", glue("{names(select(self$data, -self$response))}\n"), sep = "\n\t")
-        invisible(self)
-      }
+     tune = function() {
+       tune_spec <- logistic_reg(engine = "glmnet", penalty = tune(), mixture = tune())
+       resamples <- vfold_cv(self$train, v = 4, strata = all_of(self$response))
+       formula <- as.formula(glue("{self$response} ~ ."))
+       grid <- grid_regular(penalty(), mixture(), levels = c(30, 5))
+       recipe <-
+         recipe(formula, data = self$train) %>%
+         step_other(all_nominal_predictors(), threshold = 0.05) %>%
+         step_lencode_glm(all_nominal_predictors(), outcome = self$response) %>%
+         step_impute_bag(all_predictors()) %>%
+         step_YeoJohnson(all_numeric_predictors()) %>%
+         step_normalize(all_numeric_predictors())
+       wf <-
+         workflow() %>%
+         add_model(tune_spec) %>%
+         add_recipe(recipe)
+       tuning <-
+         tune_grid(
+           wf,
+           resamples = resamples,
+           grid = grid,
+           metrics = metric_set(roc_auc),
+           control = control_grid(save_pred = F)
+         )
+       self$tune_res <- tuning
+       self$best_params <- tuning %>% select_best(metric = "roc_auc") %>% select(penalty, mixture)
+       self$final_wf <- wf %>% finalize_workflow(self$best_params)
+       invisible(self)
+     },
+
+    fit = function() {
+       self$fitted <- parsnip::fit(self$final_wf, data = self$train)
+       invisible(self)
+     },
+
+    predict = function() self$test_preds <- predict(self$fitted, new_data = self$test, type = "prob")$.pred_1,
+
+    plot_coefs = function() {
+       df <-
+         self$fitted %>%
+         extract_fit_parsnip() %>%
+         tidy() %>%
+         filter(term != "(Intercept)")
+
+       df_non_zero <-
+         df %>%
+         filter(estimate != 0)
+
+       nb_zero_coef <- nrow(df) - nrow(df_non_zero)
+
+       df_non_zero %>%
+         mutate(Sign = if_else(estimate > 0, "+", "-")) %>%
+         mutate(abs_estimate = abs(estimate)) %>%
+         mutate(term = fct_reorder(term, abs_estimate)) %>%
+         ggplot(aes(x = term, y = abs_estimate, fill = Sign)) +
+         geom_col(alpha = 0.7) +
+         xlab(NULL) +
+         ylab("Absolute value of coefficient") +
+         scale_fill_manual(values = c("#a61d21", "#00743F")) +
+         coord_flip() +
+         labs(caption = glue("Note: {nb_zero_coef} other coefficients are zero"))
+     },
+
+     print = function() {
+       cat("Régression logistique avec régularisation elastic-net \n\n")
+       cat("\tTraining set: ", nrow(self$train), " observations\n", sep = "")
+       cat("\tTesting set: ", nrow(self$test), " observations\n\n", sep = "")
+       cat("\tVariable réponse: ", self$response, "\n\n", sep = "")
+       cat("\tPrédicteurs:\n", glue("{names(select(self$train, -self$response))}\n"), sep = "\n\t")
+       invisible(self)
+     }
   )
 )
 ```
@@ -641,10 +576,10 @@ On va ensuite se créer des jeux de données d'entrainement et de test avec et s
 
 ```{r}
 tele_contract_train <- 
-  tar_read(tele_contract_train) %>% 
-  group_by(vin) %>% 
-  slice(1) %>% 
-  ungroup()
+ tar_read(tele_contract_train) %>% 
+ group_by(vin) %>% 
+ slice(1) %>% 
+ ungroup()
 ```
 
 ```{r}
@@ -665,15 +600,14 @@ Testons d'abord un GLMNET avec seulement les variables classiques + distance pou
 On se définit un objet de classe `ClassifElasNet` avec le jeu de données d'entrainement SANS embeddings:
 
 ```{r}
-en_class <- ClassifElasNet$new(data = train_class, response = "claim_ind_cov_1_2_3_4_5_6")
+en_class <- ClassifElasNet$new(train = train_class, test = test_class, response = "claim_ind_cov_1_2_3_4_5_6")
 en_class
 ```
 
 Ensuite, on calibre les hyperparamètres et on entraine le modèle:
 
 ```{r}
-en_class$tune()
-en_class$fit()
+en_class$tune()$fit()
 ```
 
 Voici les meilleurs hyperparamètres trouvés:
@@ -688,27 +622,27 @@ Voici les coefficients calculés:
 en_class$plot_coefs()
 ```
 
-On calcule l'AUC sur l'ensemble test:
+On obtient les métriques sur l'ensemble test:
 
 ```{r}
-en_class$get_auc(test_class)
+en_class$predict()
+en_class$print_metrics()
 ```
 
 
 ### Modèle classique + distance + embeddings
 
-On se définit un objet de classe `ClassifElasNet` avec le jeu de données d'entrainement AVEC embeddings:
+On se définit un objet de classe `ClassifElasNet` avec le jeu de données d'entrainement AVEC les embeddings V1 et V2:
 
 ```{r}
-en_class_emb <- ClassifElasNet$new(data = train_class_emb, response = "claim_ind_cov_1_2_3_4_5_6")
+en_class_emb <- ClassifElasNet$new(train = train_class_emb, test = test_class_emb, response = "claim_ind_cov_1_2_3_4_5_6")
 en_class_emb
 ```
 
 Ensuite, on calibre les hyperparamètres et on entraine le modèle:
 
 ```{r}
-en_class_emb$tune()
-en_class_emb$fit()
+en_class_emb$tune()$fit()
 ```
 
 Voici les meilleurs hyperparamètres trouvés:
@@ -726,10 +660,11 @@ en_class_emb$plot_coefs()
 On calcule l'AUC sur l'ensemble test:
 
 ```{r}
-en_class_emb$get_auc(test_class_emb)
+en_class_emb$predict()
+en_class_emb$print_metrics()
 ```
 
-Les embeddings créés offrent donc une amélioration de l'AUC de `r en_class_emb$get_auc(test_class_emb) - en_class$get_auc(test_class)` sur l'ensemble test. Il faut se souvenir que les embeddings ont été calculés avec l'heure de la journée des trajets uniquement comme information. Il nous resterait la vitesse moyenne, la vitesse maximale, la distance, la durée, et le jour de la semaine à utiliser. Aussi, le réseau de neurones utilisé est très basique et pourrait probablement être amélioré. Finalement, on pourrait peut-être bénéficier d'un embedding en plus de 2 dimensions. Mais 2 dimensions est ici très pratique car on peut le visualiser.
+Les embeddings créés offrent donc une amélioration des métriques sur l'ensemble test. Il faut se souvenir que les embeddings ont été calculés avec l'heure de la journée des trajets uniquement comme information. Il nous resterait la vitesse moyenne, la vitesse maximale, la distance, la durée, et le jour de la semaine à utiliser. Aussi, le réseau de neurones utilisé est très basique et pourrait probablement être amélioré. Finalement, on pourrait peut-être bénéficier d'un embedding en plus de 2 dimensions. Mais 2 dimensions est ici très pratique car on peut le visualiser.
 
 ## GLMNET - variables télématiques créées à la main
 
@@ -741,12 +676,12 @@ test_tele <- slice(dat_tele, c(valid_indices, test_indices))
 ```
 
 ```{r}
-en_tele <- ClassifElasNet$new(data = train_tele, response = "claim_ind_cov_1_2_3_4_5_6")
+en_tele <- ClassifElasNet$new(train = train_tele, test = test_tele, response = "claim_ind_cov_1_2_3_4_5_6")
 en_tele
 ```
+
 ```{r}
-en_tele$tune()
-en_tele$fit()
+en_tele$tune()$fit()
 ```
 
 ```{r}
@@ -754,7 +689,8 @@ en_tele$plot_coefs()
 ```
 
 ```{r}
-en_tele$get_auc(test_tele)
+en_tele$predict()
+en_tele$print_metrics()
 ```
 
 
@@ -768,13 +704,12 @@ test_tele_class <- slice(dat_tele_class, c(valid_indices, test_indices))
 ```
 
 ```{r}
-en_tele_class <- ClassifElasNet$new(data = train_tele_class, response = "claim_ind_cov_1_2_3_4_5_6")
+en_tele_class <- ClassifElasNet$new(train = train_tele_class, test = test_tele_class, response = "claim_ind_cov_1_2_3_4_5_6")
 en_tele_class
 ```
 
 ```{r}
-en_tele_class$tune()
-en_tele_class$fit()
+en_tele_class$tune()$fit()
 ```
 
 ```{r}
@@ -782,6 +717,6 @@ en_tele_class$plot_coefs()
 ```
 
 ```{r}
-en_tele_class$get_auc(test_tele_class)
+en_tele_class$predict()
+en_tele_class$print_metrics()
 ```
-
