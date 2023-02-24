@@ -23,6 +23,13 @@ library(embed)
 theme_set(theme_bw())
 ```
 
+```{r}
+levels_lambda <- 50
+levels_alpha <- 5
+epoques <- 35
+```
+
+
 # Résumé
 
 Le but ici est d'extraire des *features* à partir de l'information sur l'heure de la journée de la conduite. Chargeons le jeu de données qui contient cette information:
@@ -227,19 +234,15 @@ ClassifMetrics <- R6Class(
   public = 
     list(
       mse = function() mean((self$test_targets - self$test_preds) ^ 2),
-      
-      brier_skill = function() {
-        preds_naif <- rep(mean(self$train_targets), length(self$test_targets))
-        mse_naif <- mean((self$test_targets - preds_naif) ^ 2)
-        1 - self$mse() / mse_naif
-      },
-      
+      mse_naif = function() mean((self$test_targets - rep(mean(self$train_targets), length(self$test_targets))) ^ 2),
+      brier_skill = function() 1 - self$mse() / self$mse_naif(),
       auroc = function() roc_auc_vec(truth = factor(self$test_targets, levels = c("1", "0")), estimate = self$test_preds),
       
       print_metrics = function() {
         cat("AUROC = ", round(self$auroc(), 4), "\n")
         cat("Brier score = ", round(self$mse(), 4), "\n")
         cat("Brier score skill = ", round(self$brier_skill(), 4), "\n")
+        cat("Brier score modèle naïf = ", round(self$mse_naif(), 4), "\n")
       }
     )
 )
@@ -324,7 +327,7 @@ On peut maintenant créer une nouvelle instance de NeuralNet et l'entrainer:
 
 ```{r}
 net <- NeuralNet$new(classif_mlp, train_ds, valid_ds, test_ds)
-net$train(nb_epochs = 30)
+net$train(nb_epochs = epoques)
 ```
 
 ## Performance sur l'ensemble test
@@ -445,7 +448,7 @@ ClassifGLM <- R6Class(
 Testons une régression logistique avec seulement les embeddings comme prédicteurs. On entraine d'abord sur l'ensemble `train`:
 
 ```{r}
-glm_mod <- ClassifGLM$new(train = train, test = bind_rows(valid, test), response = "claim_ind_cov_1_2_3_4_5_6")
+glm_mod <- ClassifGLM$new(train = bind_rows(train, valid), test = test, response = "claim_ind_cov_1_2_3_4_5_6")
 glm_mod$fit()
 ```
 
@@ -460,7 +463,6 @@ glm_mod$print_metrics()
 ## GLMNET embeddings + variables classiques + distance
 
 Testons maintenant une régression glmnet avec les embeddings en plus des variables classiques + distance. Créons-nous d'abord une classe R6 pour faciliter la calibration et l'entrainement des modèles elastic-net:
-
 
 ```{r}
 ClassifElasNet <- R6Class(
@@ -501,7 +503,7 @@ ClassifElasNet <- R6Class(
        tune_spec <- logistic_reg(engine = "glmnet", penalty = tune(), mixture = tune())
        resamples <- vfold_cv(self$train, v = 4, strata = all_of(self$response))
        formula <- as.formula(glue("{self$response} ~ ."))
-       grid <- grid_regular(penalty(), mixture(), levels = c(30, 5))
+       grid <- grid_regular(penalty(), mixture(), levels = c(levels_lambda, levels_alpha))
        recipe <-
          recipe(formula, data = self$train) %>%
          step_other(all_nominal_predictors(), threshold = 0.05) %>%
@@ -583,13 +585,13 @@ tele_contract_train <-
 ```
 
 ```{r}
-data_class <- select(tele_contract_train, expo:years_licensed, claim_ind_cov_1_2_3_4_5_6)
+data_class <- select(tele_contract_train, expo:avg_daily_distance, claim_ind_cov_1_2_3_4_5_6)
 
-train_class <- slice(data_class, train_indices)
-test_class <- slice(data_class, c(valid_indices, test_indices))
+train_class <- slice(data_class, c(train_indices, valid_indices))
+test_class <- slice(data_class, test_indices)
 
-train_class_emb <- bind_cols(train_class, emb_train)
-test_class_emb <- bind_cols(test_class, bind_rows(emb_valid, emb_test))
+train_class_emb <- bind_cols(train_class, bind_rows(emb_train, emb_valid))
+test_class_emb <- bind_cols(test_class, emb_test)
 ```
 
 
@@ -671,8 +673,8 @@ Les embeddings créés offrent donc une amélioration des métriques sur l'ensem
 ```{r}
 dat_tele <- select(tele_contract_train, avg_daily_distance:claim_ind_cov_1_2_3_4_5_6)
 
-train_tele <- slice(dat_tele, train_indices)
-test_tele <- slice(dat_tele, c(valid_indices, test_indices))
+train_tele <- slice(dat_tele, c(train_indices, valid_indices))
+test_tele <- slice(dat_tele, test_indices)
 ```
 
 ```{r}
@@ -699,8 +701,8 @@ en_tele$print_metrics()
 ```{r}
 dat_tele_class <- select(tele_contract_train, expo:claim_ind_cov_1_2_3_4_5_6)
 
-train_tele_class <- slice(dat_tele_class, train_indices)
-test_tele_class <- slice(dat_tele_class, c(valid_indices, test_indices))
+train_tele_class <- slice(dat_tele_class, c(train_indices, valid_indices))
+test_tele_class <- slice(dat_tele_class, test_indices)
 ```
 
 ```{r}
