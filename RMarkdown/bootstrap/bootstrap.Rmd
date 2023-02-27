@@ -1,0 +1,153 @@
+---
+title: "bootstrap"
+author: "Francis Duval"
+date: "2022-11-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r, message = F}
+library(targets)
+library(tarchetypes)
+library(tidyverse)
+library(tidymodels)
+library(LaplacesDemon)
+library(magrittr)
+theme_set(theme_bw())
+```
+
+# Données
+
+```{r}
+data_two_vins_per_policy <- tar_read(data_two_vins_per_policy)
+```
+
+```{r}
+data_1 <- 
+  data_two_vins_per_policy %>% 
+  group_by(policy_id) %>% 
+  slice(1) %>% 
+  ungroup()
+
+data_2 <- 
+  data_two_vins_per_policy %>% 
+  group_by(policy_id) %>% 
+  slice(2) %>% 
+  ungroup()
+```
+
+# Obtenir les prédictions pour véhicule 1
+
+```{r}
+rec <- 
+  recipe(claim_ind_cov_1_2_3_4_5_6 ~ expo + years_licensed + veh_age + avg_daily_distance + frac_expo_evening, data = data_1) %>% 
+  step_dummy(all_nominal_predictors())
+```
+
+```{r}
+glm_spec <- logistic_reg()
+```
+
+```{r}
+glm_wf_1 <- workflow() %>% add_model(glm_spec) %>% add_recipe(rec)
+```
+
+```{r}
+fit_1 <- fit(glm_wf_1, data = data_1)
+```
+
+```{r}
+preds_1 <- predict(fit_1, new_data = data_1, type = "prob")$.pred_1
+```
+
+
+# Boostrap
+
+```{r}
+data_2 <- 
+  data_2 %>% 
+  mutate(
+    preds_1 = preds_1,
+    y1 = data_1$claim_ind_cov_1_2_3_4_5_6
+  )
+```
+
+
+```{r}
+rec_1 <- 
+  recipe(claim_ind_cov_1_2_3_4_5_6 ~ expo + years_licensed + veh_age + avg_daily_distance + frac_expo_evening, data = data_2) %>% 
+  step_dummy(all_nominal_predictors())
+
+rec_2 <- 
+  recipe(claim_ind_cov_1_2_3_4_5_6 ~ expo + years_licensed + veh_age + avg_daily_distance + frac_expo_evening + y1, data = data_2) %>% 
+  step_dummy(all_nominal_predictors())
+```
+
+```{r}
+boot <- bootstraps(data_2, times = 1000, strata = claim_ind_cov_1_2_3_4_5_6)
+```
+
+```{r}
+glm_wf_1 <- 
+  workflow() %>% 
+  add_model(glm_spec) %>% 
+  add_recipe(rec_1)
+
+glm_wf_2 <- 
+  workflow() %>% 
+  add_model(glm_spec) %>% 
+  add_recipe(rec_2)
+```
+
+
+```{r}
+fit1 <- fit(glm_wf_1, data = data_2)
+fit2 <- fit(glm_wf_2, data = data_2)
+```
+
+
+```{r}
+res_1 <- 
+  fit_resamples(
+    glm_wf_1,
+    resamples = boot,
+    metrics = metric_set(roc_auc)
+  )
+
+res_2 <- 
+  fit_resamples(
+    glm_wf_2,
+    resamples = boot,
+    metrics = metric_set(roc_auc)
+  )
+```
+
+```{r}
+tib_res <- 
+  tibble(
+    res_1 = collect_metrics(res_1, summarize = F)$.estimate,
+    res_2 = collect_metrics(res_2, summarize = F)$.estimate
+  )
+```
+
+
+```{r}
+tib_res %>% 
+  pivot_longer(cols = res_1:res_2) %>% 
+  ggplot(aes(x = value, col = name)) +
+  geom_density() +
+  xlab("AUC") +
+  ylab("Densité") +
+  labs(subtitle = "1000 échantillons bootstrap") +
+  ggtitle("Régression logistique avec et sans vecteur réponse de l'autre véhicule") +
+  scale_color_manual(
+    values = c("#00adee", "#0855a0"), 
+    labels = c("Sans", "Avec"),
+    name = NULL
+  )
+
+```
+

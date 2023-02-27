@@ -1,0 +1,161 @@
+---
+title: "Analyse exploratoire"
+author: "Francis Duval"
+date: "2022-08-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r, message = F}
+library(targets)
+library(tidyverse)
+library(forcats)
+library(kableExtra)
+theme_set(theme_bw())
+options(scipen = 999)
+```
+
+```{r}
+tele_contract_data <- tar_read(tele_contract_data)
+glimpse(tele_contract_data)
+nb_contracts <- tele_contract_data %>% group_by(policy_id, contract_start_date) %>% slice(1) %>% nrow()
+```
+
+Les données comprennent:
+
+- `r nb_contracts` contrats
+- `r length(unique(tele_contract_data$vin))` véhicules
+- `r length(unique(tele_contract_data$policy_id))` polices (en moyenne `r round(nb_contracts / length(unique(tele_contract_data$policy_id)), 2)` contrats par police)
+- `r sum(tele_contract_data$nb_trips)` trajets
+- `r round(sum(tele_contract_data$expo))` années d'exposition
+
+# Polices, contrats, véhicules
+
+```{r}
+tele_contract_data %>% 
+  group_by(policy_id, contract_start_date) %>% 
+  summarise(n = length(unique(vin))) %>% 
+  ggplot(aes(x = n)) +
+  geom_bar() +
+  scale_x_continuous(breaks = 1:10) +
+  xlab("Nombre de véhicules") +
+  ylab("Nombre de contrats") +
+  ggtitle("Nombre de véhicules par contrat")
+```
+
+```{r}
+tele_contract_data %>% 
+  group_by(policy_id) %>% 
+  summarise(n = length(unique(vin))) %>% 
+  ggplot(aes(x = n)) +
+  geom_bar() +
+  scale_x_continuous(breaks = 1:10) +
+  xlab("Nombre de véhicules") +
+  ylab("Nombre de polices") +
+  ggtitle("Nombre de véhicules par police")
+```
+
+```{r}
+tele_contract_data %>% 
+  group_by(policy_id) %>% 
+  summarise(n = length(unique(contract_start_date))) %>% 
+  ggplot(aes(x = n)) +
+  geom_bar() +
+  scale_x_continuous(breaks = 1:10) +
+  xlab("Nombre de contrats") +
+  ylab("Nombre de polices") +
+  ggtitle("Nombre de contrats par police")
+```
+
+
+
+```{r}
+tele_contract_data %>% 
+  group_by(policy_id, contract_start_date) %>% 
+  slice(1) %>% 
+  ggplot(aes(x = expo)) +
+  geom_histogram(bins = 50, col = "black", fill = "white") +
+  ggtitle("Durée des contrats") +
+  xlab("Durée") +
+  ylab("Nombre de contrats")
+```
+
+```{r}
+tele_contract_data %>% 
+  group_by(vin) %>% 
+  summarise(duree = sum(expo)) %>% 
+  ggplot(aes(x = duree)) +
+  geom_histogram(bins = 50, col = "black", fill = "white") +
+  ggtitle("Durée de couverture des véhicules") +
+  xlab("Durée (années)") +
+  ylab("Nombre de véhicules")
+```
+
+# Réclamations
+
+| | 0 claim | 1 claim | 2 claims | 3+ claims | Total |
+| ------------------|:----------:|:----------:|:----------:|:----------:|:----------:|
+| Couverture 1 (AB)  | `r sum(tele_contract_data$nb_claims_cov_1 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_1 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_1 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_1 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_1)`|
+| Couverture 2 (Col) | `r sum(tele_contract_data$nb_claims_cov_2 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_2 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_2 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_2 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_2)`|
+| Couverture 3 (Comp)| `r sum(tele_contract_data$nb_claims_cov_3 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_3 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_3 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_3 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_3)`|
+| Couverture 4 (DCPD)| `r sum(tele_contract_data$nb_claims_cov_4 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_4 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_4 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_4 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_4)`|
+| Couverture 5 (Liab)| `r sum(tele_contract_data$nb_claims_cov_5 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_5 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_5 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_5 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_5)`|
+| Couverture 6 (UA)  | `r sum(tele_contract_data$nb_claims_cov_6 == 0)`          | `r sum(tele_contract_data$nb_claims_cov_6 == 1)`          |`r sum(tele_contract_data$nb_claims_cov_6 == 2)`          | `r sum(tele_contract_data$nb_claims_cov_6 > 2)`          | `r sum(tele_contract_data$nb_claims_cov_6)`|
+| Couvertures 2 et 4 | `r sum(tele_contract_data$nb_claims_cov_2_4 == 0)`        | `r sum(tele_contract_data$nb_claims_cov_2_4 == 1)`        |`r sum(tele_contract_data$nb_claims_cov_2_4 == 2)`        | `r sum(tele_contract_data$nb_claims_cov_2_4 > 2)`        | `r sum(tele_contract_data$nb_claims_cov_2_4)`|
+| Toutes couvertures | `r sum(tele_contract_data$nb_claims_cov_1_2_3_4_5_6 == 0)`| `r sum(tele_contract_data$nb_claims_cov_1_2_3_4_5_6 == 1)`|`r sum(tele_contract_data$nb_claims_cov_1_2_3_4_5_6 == 2)`| `r sum(tele_contract_data$nb_claims_cov_1_2_3_4_5_6 > 2)`| `r sum(tele_contract_data$nb_claims_cov_1_2_3_4_5_6)`|
+
+
+```{r}
+claim_data_tele <- tar_read(claim_data_tele)
+glimpse(claim_data_tele)
+```
+
+```{r}
+claim_data_tele %>% 
+  summarise_at(vars(cov_1_ind:cov_6_ind), sum) %>% 
+  pivot_longer(cov_1_ind:cov_6_ind) %>% 
+  mutate(name = factor(name)) %>% 
+  ggplot(aes(x = name, y = value)) +
+  geom_col() +
+  ylab("Nombre de réclamations") +
+  xlab("Couverture touchée") +
+  scale_x_discrete(labels = c("AB", "Col", "Comp", "DCPD", "Liab", "UA"))
+```
+
+```{r}
+claim_data_tele %>% 
+  summarise_at(vars(cov_1_cost:cov_6_cost), sum) %>% 
+  pivot_longer(cov_1_cost:cov_6_cost) %>% 
+  mutate(name = factor(name)) %>% 
+  ggplot(aes(x = name, y = value)) +
+  geom_col() +
+  ylab("Montant des réclamations") +
+  xlab("Couverture touchée") +
+  scale_x_discrete(labels = c("AB", "Col", "Comp", "DCPD", "Liab", "UA"))
+```
+
+```{r}
+claim_data_tele %>% 
+  select(cov_1_cost:cov_6_cost) %>% 
+  pivot_longer(everything()) %>% 
+  filter(value != 0) %>% 
+  group_by(name) %>% 
+  summarise(
+    mean = round(mean(value)),
+    min = round(min(value)),
+    q_05 = round(quantile(value, 0.05)),
+    q_25 = round(quantile(value, 0.25)),
+    q_50 = round(quantile(value, 0.5)),
+    q_75 = round(quantile(value, 0.75)),
+    q_95 = round(quantile(value, 0.95)),
+    max = round(max(value))
+  ) %>% 
+  rename(couverture = name) %>% 
+  mutate(couverture = c("AB", "Col", "Comp", "DCPD", "Liab", "UA")) %>% 
+  kbl(, format.args = list(big.mark = ",")) %>% 
+  kable_paper("hover", full_width = F)
+```
+

@@ -1,0 +1,234 @@
+---
+title: "glm_vs_gee"
+author: "Francis Duval"
+date: "2022-10-31"
+output: html_document
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = T)
+```
+
+```{r, message = F}
+library(targets)
+library(tarchetypes)
+library(tidyverse)
+library(tidymodels)
+library(multilevelmod)
+library(glmnet)
+library(glue)
+library(rlang)
+library(ggpubr)
+library(gee)
+library(broom)
+library(geepack)
+theme_set(theme_bw())
+```
+
+### Importer objets utiles
+
+```{r}
+data_gee_train_baked <- tar_read(dat_train_baked_ls)[[1]]
+data_gee_test_baked <- tar_read(dat_test_baked_ls)[[1]]
+
+gee_fit <- tar_read(gee_fit_class_tele_1)
+glm_fit <- tar_read(glm_fit_class_tele_1)
+
+gee_fit_class <- tar_read(gee_fit_class_1)
+glm_fit_class <- tar_read(glm_fit_class_1)
+
+gee_fit_tele <- tar_read(gee_fit_tele_1)
+glm_fit_tele <- tar_read(glm_fit_tele_1)
+```
+
+### Hypothèse de linéarité
+
+```{r}
+preds_glm_train <- predict(glm_fit)
+```
+
+```{r}
+dat_plot <- 
+  data_gee_train_baked %>% 
+  mutate(glm_pred = preds_glm_train) %>% 
+  sample_n(size = 1000) %>% 
+  pivot_longer(cols = expo:frac_expo_fri_sat)
+```
+
+```{r}
+ggplot(dat_plot, aes(x = glm_pred, y = value)) +
+  geom_point(size = 0.1, alpha = 0.5) +
+  geom_smooth(method = "loess") +
+  facet_wrap(~ name, scales = "free_y") +
+  ylab("Valeur du prédicteur") +
+  xlab("Logit(prédiction)")
+```
+
+### Comparaison avec les coefficients GLM
+
+**Classique seulement**
+
+```{r}
+dat_glm_class <- tidy(glm_fit_class) %>% mutate(model = "glm")
+dat_gee_class <- tidy(gee_fit_class) %>% mutate(model = "gee")
+
+dat_class <- bind_rows(dat_glm_class, dat_gee_class) %>% filter(term != "(Intercept)")
+```
+
+```{r}
+pd <- position_dodge(width = 0.5)
+
+ggplot(dat_class, aes(x = term, y = estimate, color = model)) +
+  geom_point(aes(shape = model), size = 2, position = pd) +
+  scale_color_manual(name = "Modèle", values = c("coral", "steelblue")) +
+  scale_shape_manual(name = "Modèle", values = c(17, 19)) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.1, position = pd) +
+  coord_flip() +
+  xlab(NULL) +
+  ylab("Coefficient") +
+  ggtitle("GLM vs GEE (matrice de corrélation « exchangeable »)") +
+  labs(subtitle = "Classique")
+```
+
+**Télématique seulement**
+
+```{r}
+dat_glm_tele <- tidy(glm_fit_tele) %>% mutate(model = "glm")
+dat_gee_tele <- tidy(gee_fit_tele) %>% mutate(model = "gee")
+
+dat_tele <- bind_rows(dat_glm_tele, dat_gee_tele) %>% filter(term != "(Intercept)")
+```
+
+```{r}
+pd <- position_dodge(width = 0.5)
+
+ggplot(dat_tele, aes(x = term, y = estimate, color = model)) +
+  geom_point(aes(shape = model), size = 2, position = pd) +
+  scale_color_manual(name = "Modèle", values = c("coral", "steelblue")) +
+  scale_shape_manual(name = "Modèle", values = c(17, 19)) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.1, position = pd) +
+  coord_flip() +
+  xlab(NULL) +
+  ylab("Coefficient") +
+  ggtitle("GLM vs GEE (matrice de corrélation « exchangeable »)") +
+  labs(subtitle = "Télématique")
+```
+
+**Classique + télématique**
+
+```{r}
+dat_glm <- tidy(glm_fit) %>% mutate(model = "glm")
+dat_gee <- tidy(gee_fit) %>% mutate(model = "gee")
+
+dat <- bind_rows(dat_glm, dat_gee) %>% filter(term != "(Intercept)")
+```
+
+```{r}
+pd <- position_dodge(width = 0.5)
+
+ggplot(dat, aes(x = term, y = estimate, color = model)) +
+  geom_point(aes(shape = model), size = 2, position = pd) +
+  scale_color_manual(name = "Modèle", values = c("coral", "steelblue")) +
+  scale_shape_manual(name = "Modèle", values = c(17, 19)) +
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error), width = 0.1, position = pd) +
+  coord_flip() +
+  xlab(NULL) +
+  ylab("Coefficient") +
+  ggtitle("GLM vs GEE (matrice de corrélation « exchangeable »)") +
+  labs(subtitle = "Classique + télématique")
+```
+
+### Corrélation estimée entre 2 véhicules
+
+**Classique seulement**
+
+```{r}
+summary(gee_fit_class)$corr$Estimate # Estimé
+summary(gee_fit_class)$corr$Std.err # Écart-type
+```
+
+**Télématique seulement**
+
+```{r}
+summary(gee_fit_tele)$corr$Estimate # Estimé
+summary(gee_fit_tele)$corr$Std.err # Écart-type
+```
+
+**Classique + télématique**
+
+```{r}
+summary(gee_fit)$corr$Estimate # Estimé
+summary(gee_fit)$corr$Std.err # Écart-type
+```
+
+### Résultats sur l'ensemble test
+
+#### Classique seulement
+
+```{r}
+preds_glm_test <- predict(glm_fit_class, type = "response", newdata = data_gee_test_baked)
+preds_gee_test <- predict(gee_fit_class, type = "response", newdata = data_gee_test_baked)
+
+response_test <- factor(data_gee_test_baked$claim_ind_cov_1_2_3_4_5_6, levels = c("1", "0"))
+```
+
+```{r}
+tib <- 
+  tibble(
+    model = c("GLM", "GEE"),
+    auc = c(roc_auc_vec(response_test, preds_glm_test), roc_auc_vec(response_test, preds_gee_test)),
+    log_loss = c(mn_log_loss_vec(response_test, preds_glm_test), mn_log_loss_vec(response_test, preds_gee_test))
+  )
+```
+
+```{r}
+kableExtra::kable(tib, digits = 5)
+```
+
+
+#### Télématique seulement
+
+```{r}
+preds_glm_test <- predict(glm_fit_tele, type = "response", newdata = data_gee_test_baked)
+preds_gee_test <- predict(gee_fit_tele, type = "response", newdata = data_gee_test_baked)
+
+response_test <- factor(data_gee_test_baked$claim_ind_cov_1_2_3_4_5_6, levels = c("1", "0"))
+```
+
+```{r}
+tib <- 
+  tibble(
+    model = c("GLM", "GEE"),
+    auc = c(roc_auc_vec(response_test, preds_glm_test), roc_auc_vec(response_test, preds_gee_test)),
+    log_loss = c(mn_log_loss_vec(response_test, preds_glm_test), mn_log_loss_vec(response_test, preds_gee_test))
+  )
+```
+
+```{r}
+kableExtra::kable(tib, digits = 5)
+```
+
+
+#### Classique + télématique
+
+```{r}
+preds_glm_test <- predict(glm_fit, type = "response", newdata = data_gee_test_baked)
+preds_gee_test <- predict(gee_fit, type = "response", newdata = data_gee_test_baked)
+
+response_test <- factor(data_gee_test_baked$claim_ind_cov_1_2_3_4_5_6, levels = c("1", "0"))
+```
+
+```{r}
+tib <- 
+  tibble(
+    model = c("GLM", "GEE"),
+    auc = c(roc_auc_vec(response_test, preds_glm_test), roc_auc_vec(response_test, preds_gee_test)),
+    log_loss = c(mn_log_loss_vec(response_test, preds_glm_test), mn_log_loss_vec(response_test, preds_gee_test))
+  )
+```
+
+```{r}
+kableExtra::kable(tib, digits = 5)
+```
+
+

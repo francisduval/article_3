@@ -1,0 +1,90 @@
+---
+title: "Paradox Simpson"
+author: "Francis Duval"
+date: "2022-11-28"
+output: html_document
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = T)
+theme_set(theme_bw())
+```
+
+```{r}
+library(bayestestR)
+library(tidyverse)
+library(geepack)
+library(lme4)
+```
+
+
+```{r}
+dat <- 
+  simulate_simpson(
+    n = 100,
+    r = 0.7,
+    groups = 3,
+    difference = 2,
+    group_prefix = ""
+  )
+
+p <- 
+  ggplot(dat, aes(x = V1, y = V2, col = Group)) + 
+  geom_point()
+
+p
+```
+
+```{r}
+form <- as.formula(V2 ~ V1)
+```
+
+
+```{r}
+lm_fit <- lm(form, data = dat)
+gee_fit <- geeglm(form, family = gaussian, data = dat, id = Group, corstr = "exchangeable")
+mm_fit <- lmer(V2 ~ V1 + (1|Group), data = dat)
+```
+
+
+```{r}
+lm_pred <- predict(lm_fit)
+gee_pred <- predict(gee_fit)
+
+dat_pred <- 
+  dat %>% 
+  mutate(
+    lm_pred = predict(lm_fit, newdata = dat),
+    gee_pred = predict(gee_fit, newdata = dat),
+    mm_pred = predict(mm_fit, newdata = dat),
+    mm_gen_pred = predict(mm_fit, newdata = dat, re.form = ~0)
+  )
+```
+
+```{r}
+ggplot(dat_pred) +
+  geom_point(aes(x = V1, y = V2, col = Group), size = 0.8) +
+  geom_line(aes(x = V1, y = lm_pred)) +
+  ggtitle("Modèle linéaire")
+```
+```{r}
+ggplot(dat_pred) +
+  geom_point(aes(x = V1, y = V2, col = Group), size = 0.8) +
+  geom_line(aes(x = V1, y = gee_pred)) +
+  ggtitle("Modèle GEE")
+```
+
+```{r}
+ggplot(dat_pred) +
+  geom_point(aes(x = V1, y = V2, col = Group), size = 0.8) +
+  geom_line(aes(x = V1, y = mm_pred, col = Group)) +
+  geom_line(aes(x = V1, y = mm_gen_pred), col = "black") +
+  ggtitle("Modèle « random intercepts »")
+```
+```{r}
+
+
+dat_pred %>% 
+  mutate(mm_gen_pred = predict(mm_fit, newdata = new_dat, re.form = ~0))
+```
+

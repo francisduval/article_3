@@ -160,9 +160,11 @@ list(
   # RMarkdown -------------------------------------------------------------------------------------------------------------------
   # -----------------------------------------------------------------------------------------------------------------------------
   
-  tar_render(glm_vs_gee, "RMarkdown/glm_vs_gee.Rmd"),
-  tar_render(gee_glm_nb_veh, "RMarkdown/gee_glm_nb_veh.Rmd")#,
-  # tar_render(nn_time_of_day, "RMarkdown/nn_time_of_day.Rmd")
+  tar_render(glm_vs_gee, "RMarkdown/glm_vs_gee/glm_vs_gee.Rmd"),
+  tar_render(bootstrap, "RMarkdown/bootstrap/bootstrap.Rmd"),
+  tar_render(gee_glm_nb_veh, "RMarkdown/gee_glm_nb_veh/gee_glm_nb_veh.Rmd"),
+  tar_render(correlation_entre_vehicules, "RMarkdown/correlation_entre_vehicules/correlation_entre_vehicules.Rmd")#,
+  # tar_render(nn_time_of_day, "RMarkdown/nn_time_of_day/nn_time_of_day.Rmd")
   
   # =============================================================================================================================
   
