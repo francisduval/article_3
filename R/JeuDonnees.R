@@ -8,6 +8,12 @@ JeuDonnees <-
         tele_ml_data = NULL,
         nn_data = NULL,
         
+        d_dat = NULL,
+        h_dat = NULL,
+        p_dat = NULL,
+        vmo_dat = NULL,
+        vma_dat = NULL,
+        
         # ----------
         
         initialize = function(data) {
@@ -170,7 +176,7 @@ JeuDonnees <-
               group_by(vin) %>%
               summarise(vma_cols = list(compute_speed_buckets(max_speed, duration, nb_buckets))) %>%
               unnest(cols = vma_cols) %>%
-              mutate(names = rep(glue("vmo_{1:nb_buckets}"), nrow(.) / nb_buckets)) %>%
+              mutate(names = rep(glue("vma_{1:nb_buckets}"), nrow(.) / nb_buckets)) %>%
               pivot_wider(names_from = names, values_from = vma_cols)
             
             return(res)
@@ -184,12 +190,26 @@ JeuDonnees <-
             p_dat <- compute_p_cols(data)
             vmo_dat <- compute_vmo_cols(data)
             vma_dat <- compute_vma_cols(data)
+            
+            res <- 
+              d_dat %>% 
+              left_join(h_dat, by = "vin") %>% 
+              left_join(p_dat, by = "vin") %>% 
+              left_join(vmo_dat, by = "vin") %>% 
+              left_join(vma_dat, by = "vin")
+            
+            return(res)
           }
           
           # -----
           
           self$nn_data <- compute_nn_data(data)
           
+          self$d_dat <- compute_d_col(data)
+          self$h_dat <- compute_h_cols(data)
+          self$p_dat <- compute_p_cols(data)
+          self$vmo_dat <- compute_vmo_cols(data)
+          self$vma_dat <- compute_vma_cols(data)
           
           # -----
         }
@@ -198,4 +218,3 @@ JeuDonnees <-
         
       )
   )
-
