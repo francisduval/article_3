@@ -1,6 +1,8 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "Réseau de neurones"
+author: "Francis Duval"
+date: "2023-03-03"
+output: rmdformats::material
 ---
 
 ```{r setup, include = F}
@@ -13,40 +15,37 @@ library(tidyverse)
 library(torch)
 library(luz)
 library(tidymodels)
+library(fs)
+library(embed)
+library(glue)
+library(kableExtra)
+library(R6)
+walk(dir_ls("R"), source)
+theme_set(theme_bw())
 ```
 
 ```{r}
 JeuDonnees_train <- tar_read(JeuDonnees_train)
 ```
 
+# Séparation entrainement-validation-test
+
 ```{r}
 train_indices <- 1:25000
 valid_indices <- 25001:32500
 test_indices <- 32501:40000
 
-data_nn <- left_join(JeuDonnees_train$classic_ml_data, JeuDonnees_train$nn_data, by = "vin")
+data_nn <- 
+  JeuDonnees_train$classic_ml_data %>% 
+  left_join(select(JeuDonnees_train$tele_ml_data, -claim_ind_cov_1_2_3_4_5_6), by = "vin") %>% 
+  left_join(JeuDonnees_train$nn_data, by = "vin")
 
 train_df <- data_nn[train_indices, ]
 valid_df <- data_nn[valid_indices, ]
 test_df <- data_nn[test_indices, ]
 ```
 
-
-```{r}
-x <- train_df %>% select(expo:years_licensed, distance)
-
-rec <- 
-  recipe(~ ., data = x) %>% 
-  step_impute_median(commute_distance, years_claim_free) %>% 
-  step_other(all_nominal(), threshold = 0.05) %>% 
-  step_dummy(all_nominal())
-
-rec %>% prep() %>% bake(new_data = x)
-
-```
-
-
-
+**Classe R6 pour les jeux de données**
 ```{r}
 nn_dataset <- 
   dataset(
@@ -108,6 +107,7 @@ nn_dataset <-
 )
 ```
 
+**Jeux de données et dataloaders**
 ```{r}
 train_ds <- nn_dataset(train_df)
 valid_ds <- nn_dataset(valid_df)
@@ -119,6 +119,8 @@ train_dl <- train_ds %>% dataloader(batch_size = 128, shuffle = F)
 valid_dl <- valid_ds %>% dataloader(batch_size = 128, shuffle = F)
 test_dl <- test_ds %>% dataloader(batch_size = 128, shuffle = F)
 ```
+
+# Définition du réseau de neurones
 
 ```{r}
 classif_mlp <- 
@@ -161,28 +163,110 @@ classif_mlp <-
 )
 ```
 
+**On teste la méthode forward**
 ```{r}
 net <- classif_mlp$new(input_size_tele = 61, input_size_class = 16)
 input <- train_ds$.getitem(1:10)$x
 net$forward(input)
 ```
+# Entrainement du réseau
 
 ```{r}
-fit <- 
-  classif_mlp %>%
-  setup(
-    loss = nnf_binary_cross_entropy,
-    optimizer = optim_adam,
-    metrics = list(luz_metric_binary_auroc(thresholds = seq(0, 0.5, by = 0.0005)), luz_metric_mse())
-  ) %>%
-  set_hparams(input_size_tele = 61, input_size_class = 16) %>% 
-  luz::fit(
-    train_dl, 
-    epochs = 1, 
-    valid_data = valid_dl
-  )
+reseau <- NeuralNet$new(model_spec = classif_mlp, train_ds = train_ds, valid_ds = valid_ds, test_ds = test_ds)
+reseau$train(input_size_tele = 61, input_size_class = 16, nb_epochs = 40)
+```
+
+```{r}
+reseau$plot_training()
+```
+
+# Entrainement des autres modèles
+
+**GLMNET classique + distance**
+```{r}
+train <- train_df %>% bind_rows(valid_df) %>% select(expo:claim_ind_cov_1_2_3_4_5_6, distance)
+test <- select(test_df, expo:claim_ind_cov_1_2_3_4_5_6, distance)
+
+glmnet_cd <- ClassifElasNet$new(train, test, "claim_ind_cov_1_2_3_4_5_6")
+glmnet_cd
+```
+
+```{r}
+glmnet_cd$tune(levels_lambda = 5, levels_alpha = 50)
+glmnet_cd$train()
+```
+
+**GLMNET classique + distance + variables télématiques « handcrafted »**
+```{r}
+train <- train_df %>% bind_rows(valid_df) %>% select(expo:distance)
+test <- test_df %>% select(expo:distance)
+
+glmnet_cdt <- ClassifElasNet$new(train, test, "claim_ind_cov_1_2_3_4_5_6")
+glmnet_cdt
+```
+
+```{r}
+glmnet_cdt$tune(levels_lambda = 5, levels_alpha = 50)
+glmnet_cdt$train()
+```
+
+**GLMNET classique + distance + embedding**
+```{r}
+emb_train <- reseau$fitted$model$extract_embedding(train_ds[1:25000]$x) %>% as.matrix() %>% as_tibble()
+emb_valid <- reseau$fitted$model$extract_embedding(valid_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
+emb_test <- reseau$fitted$model$extract_embedding(test_ds[1:7500]$x) %>% as.matrix() %>% as_tibble()
+```
+
+```{r}
+ggplot(emb_train, aes(x = V1, y = V2)) + geom_point(alpha = 0.1, size = 0.8)
+```
+
+```{r}
+train <- 
+  train_df %>% 
+  bind_rows(valid_df) %>% 
+  select(expo:claim_ind_cov_1_2_3_4_5_6, distance) %>% 
+  bind_cols(bind_rows(emb_train, emb_valid))
+
+test <- 
+  test_df %>% 
+  select(expo:claim_ind_cov_1_2_3_4_5_6, distance) %>% 
+  bind_cols(emb_test)
+
+glmnet_cde <- ClassifElasNet$new(train, test, "claim_ind_cov_1_2_3_4_5_6")
+glmnet_cde
+```
+
+```{r}
+glmnet_cde$tune(levels_lambda = 5, levels_alpha = 50)
+glmnet_cde$train()
 ```
 
 
+# Résultats sur l'ensemble test
+
+Obtenir les prédictions sur l'ensemble test
+```{r}
+reseau$predict()
+glmnet_cd$predict()
+glmnet_cdt$predict()
+glmnet_cde$predict()
+```
+
+Tableau des résultats
+```{r}
+tab <- 
+  tribble(
+    ~`Modèle`, ~AUROC, ~`Brier Score (MSE)`, ~`Brier Score Skill`,
+    "Réseau de neurones", round(reseau$auroc(), 4), round(reseau$mse(), 4), round(reseau$brier_skill(), 4),
+    "GLMNET classique + distance", round(glmnet_cd$auroc(), 4), round(glmnet_cd$mse(), 4), round(glmnet_cd$brier_skill(), 4),
+    "GLMNET classique + distance + variables télématiques « handcrafted »", round(glmnet_cdt$auroc(), 4), round(glmnet_cdt$mse(), 4), round(glmnet_cdt$brier_skill(), 4),
+    "GLMNET classique + distance + embedding", round(glmnet_cde$auroc(), 4), round(glmnet_cde$mse(), 4), round(glmnet_cde$brier_skill(), 4),
+    "Modèle naïf", NA, reseau$mse_naif(), 0
+)
+```
 
 
+```{r}
+kable(tab, booktabs = TRUE, digits = 4) %>% kable_styling(full_width = F)
+```

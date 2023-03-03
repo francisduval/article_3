@@ -8,12 +8,6 @@ JeuDonnees <-
         tele_ml_data = NULL,
         nn_data = NULL,
         
-        d_dat = NULL,
-        h_dat = NULL,
-        p_dat = NULL,
-        vmo_dat = NULL,
-        vma_dat = NULL,
-        
         # ----------
         
         initialize = function(data) {
@@ -204,12 +198,6 @@ JeuDonnees <-
           # -----
           
           self$nn_data <- compute_nn_data(data)
-          
-          self$d_dat <- compute_d_col(data)
-          self$h_dat <- compute_h_cols(data)
-          self$p_dat <- compute_p_cols(data)
-          self$vmo_dat <- compute_vmo_cols(data)
-          self$vma_dat <- compute_vma_cols(data)
           
           # -----
         }
