@@ -66,27 +66,33 @@ list(
   # ----------
   
   tar_target(vins, unique(aug_trip_data_1_contract$vin), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
-  tar_target(vins_train, vins[1:40000]),
-  tar_target(vins_test, vins[40001:49671]),
+  
+  tar_target(vins_learn, vins[1:40000]),
+  tar_target(vins_train, vins_learn[1:25000]),
+  tar_target(vins_valid, vins_learn[25001:32500]),
+  tar_target(vins_test, vins_learn[32501:40000]),
+  tar_target(vins_confirm, vins[40001:49671]),
   
   # ----------
   
+  tar_target(atd1c_learn, filter(aug_trip_data_1_contract, vin %in% vins_learn), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
   tar_target(atd1c_train, filter(aug_trip_data_1_contract, vin %in% vins_train), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
+  tar_target(atd1c_valid, filter(aug_trip_data_1_contract, vin %in% vins_valid), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
   tar_target(atd1c_test, filter(aug_trip_data_1_contract, vin %in% vins_test), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
-
+  tar_target(atd1c_confirm, filter(aug_trip_data_1_contract, vin %in% vins_confirm), pattern = map(aug_trip_data_1_contract), iteration = "vector"),
+  
   # ----------
   
+  tar_target(JeuDonnees_learn, JeuDonnees$new(atd1c_learn)),
   tar_target(JeuDonnees_train, JeuDonnees$new(atd1c_train)),
+  tar_target(JeuDonnees_valid, JeuDonnees$new(atd1c_valid)),
+  tar_target(JeuDonnees_test, JeuDonnees$new(atd1c_test)),
+  tar_target(JeuDonnees_confirm, JeuDonnees$new(atd1c_confirm)),
   
   # ----------
-  
-  tar_target(tele_contract_train, compute_telematics_summaries(atd1c_train)),
-  tar_target(tele_contract_test, compute_telematics_summaries(atd1c_test)),
-  
-  # ---------- 
-  
-  tar_target(train_daytime, make_nn_data(atd1c_train, nb_sec = 3600), pattern = map(atd1c_train), iteration = "vector"),
-  tar_target(test_daytime, make_nn_data(atd1c_test, nb_sec = 3600), pattern = map(atd1c_test), iteration = "vector"),
+
+  tar_target(tele_contract_train, compute_telematics_summaries(atd1c_learn)),
+  tar_target(tele_contract_test, compute_telematics_summaries(atd1c_confirm)),
   
   # ---------- 
   
@@ -154,16 +160,16 @@ list(
     ),
 
   tar_combine(glm_fit_ls, fit[["glm_fit"]], command = list(!!!.x)),
-  tar_combine(gee_fit_ls, fit[["gee_fit"]], command = list(!!!.x)),
+  tar_combine(gee_fit_ls, fit[["gee_fit"]], command = list(!!!.x))#,
     
   # -----------------------------------------------------------------------------------------------------------------------------
   # RMarkdown -------------------------------------------------------------------------------------------------------------------
   # -----------------------------------------------------------------------------------------------------------------------------
   
-  tar_render(glm_vs_gee, "RMarkdown/glm_vs_gee/glm_vs_gee.Rmd"),
-  tar_render(bootstrap, "RMarkdown/bootstrap/bootstrap.Rmd"),
-  tar_render(gee_glm_nb_veh, "RMarkdown/gee_glm_nb_veh/gee_glm_nb_veh.Rmd"),
-  tar_render(correlation_entre_vehicules, "RMarkdown/correlation_entre_vehicules/correlation_entre_vehicules.Rmd")#,
+  # tar_render(glm_vs_gee, "RMarkdown/glm_vs_gee/glm_vs_gee.Rmd"),
+  # tar_render(bootstrap, "RMarkdown/bootstrap/bootstrap.Rmd"),
+  # tar_render(gee_glm_nb_veh, "RMarkdown/gee_glm_nb_veh/gee_glm_nb_veh.Rmd"),
+  # tar_render(correlation_entre_vehicules, "RMarkdown/correlation_entre_vehicules/correlation_entre_vehicules.Rmd"),
   # tar_render(nn_time_of_day, "RMarkdown/nn_time_of_day/nn_time_of_day.Rmd")
   
   # =============================================================================================================================
