@@ -94,6 +94,7 @@ list(
   tar_target(
     train_df, 
     JeuDonnees_train$classic_ml_data %>% 
+      select(-claim_ind_cov_1_2_3_4_5_6) %>% 
       left_join(JeuDonnees_train$tele_ml_data, by = "vin") %>% 
       left_join(JeuDonnees_train$nn_data, by = "vin")
   ),
@@ -101,6 +102,7 @@ list(
   tar_target(
     valid_df, 
     JeuDonnees_valid$classic_ml_data %>% 
+      select(-claim_ind_cov_1_2_3_4_5_6) %>% 
       left_join(JeuDonnees_valid$tele_ml_data, by = "vin") %>% 
       left_join(JeuDonnees_valid$nn_data, by = "vin")
   ),
@@ -110,18 +112,40 @@ list(
   tar_target(
     test_df, 
     JeuDonnees_test$classic_ml_data %>% 
+      select(-claim_ind_cov_1_2_3_4_5_6) %>% 
       left_join(JeuDonnees_test$tele_ml_data, by = "vin") %>% 
       left_join(JeuDonnees_test$nn_data, by = "vin")
+  ),
+
+  tar_target(
+    learn_df, 
+    JeuDonnees_learn$classic_ml_data %>% 
+      select(-claim_ind_cov_1_2_3_4_5_6) %>% 
+      left_join(JeuDonnees_learn$tele_ml_data, by = "vin") %>% 
+      left_join(JeuDonnees_learn$nn_data, by = "vin")
+  ),
+    
+  tar_target(
+    confirm_df, 
+    JeuDonnees_confirm$classic_ml_data %>% 
+      select(-claim_ind_cov_1_2_3_4_5_6) %>% 
+      left_join(JeuDonnees_confirm$tele_ml_data, by = "vin") %>% 
+      left_join(JeuDonnees_confirm$nn_data, by = "vin")
   ),
   
   # ----------
   
-  
-  
-  # ----------
-
-  # tar_target(tele_contract_train, compute_telematics_summaries(atd1c_learn)),
-  # tar_target(tele_contract_test, compute_telematics_summaries(atd1c_confirm)),
+  tar_target(
+    glmnet_cd,
+    {
+      train <- train_valid_df %>% select(expo:claim_ind_cov_1_2_3_4_5_6, distance)
+      test <- select(test_df, expo:claim_ind_cov_1_2_3_4_5_6, distance)
+      
+      glmnet_cd <- ClassifElasNet$new(train, test, "claim_ind_cov_1_2_3_4_5_6")
+      glmnet_cd$tune(levels_lambda = 5, levels_alpha = 50)
+      glmnet_cd$train()
+    }
+  ),
   
   # ---------- 
   
