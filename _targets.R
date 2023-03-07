@@ -40,7 +40,7 @@ tar_option_set(
   garbage_collection = T,
   memory = "transient",
   format = "qs",
-  workspace_on_error = F,
+  workspace_on_error = T,
   iteration = "list"
 )
 
@@ -88,11 +88,40 @@ list(
   tar_target(JeuDonnees_valid, JeuDonnees$new(atd1c_valid)),
   tar_target(JeuDonnees_test, JeuDonnees$new(atd1c_test)),
   tar_target(JeuDonnees_confirm, JeuDonnees$new(atd1c_confirm)),
+
+  # ----------
+
+  tar_target(
+    train_df, 
+    JeuDonnees_train$classic_ml_data %>% 
+      left_join(JeuDonnees_train$tele_ml_data, by = "vin") %>% 
+      left_join(JeuDonnees_train$nn_data, by = "vin")
+  ),
+  
+  tar_target(
+    valid_df, 
+    JeuDonnees_valid$classic_ml_data %>% 
+      left_join(JeuDonnees_valid$tele_ml_data, by = "vin") %>% 
+      left_join(JeuDonnees_valid$nn_data, by = "vin")
+  ),
+  
+  tar_target(train_valid_df, bind_rows(train_df, valid_df)),
+  
+  tar_target(
+    test_df, 
+    JeuDonnees_test$classic_ml_data %>% 
+      left_join(JeuDonnees_test$tele_ml_data, by = "vin") %>% 
+      left_join(JeuDonnees_test$nn_data, by = "vin")
+  ),
+  
+  # ----------
+  
+  
   
   # ----------
 
-  tar_target(tele_contract_train, compute_telematics_summaries(atd1c_learn)),
-  tar_target(tele_contract_test, compute_telematics_summaries(atd1c_confirm)),
+  # tar_target(tele_contract_train, compute_telematics_summaries(atd1c_learn)),
+  # tar_target(tele_contract_test, compute_telematics_summaries(atd1c_confirm)),
   
   # ---------- 
   
@@ -160,7 +189,7 @@ list(
     ),
 
   tar_combine(glm_fit_ls, fit[["glm_fit"]], command = list(!!!.x)),
-  tar_combine(gee_fit_ls, fit[["gee_fit"]], command = list(!!!.x))#,
+  tar_combine(gee_fit_ls, fit[["gee_fit"]], command = list(!!!.x))
     
   # -----------------------------------------------------------------------------------------------------------------------------
   # RMarkdown -------------------------------------------------------------------------------------------------------------------
@@ -174,4 +203,5 @@ list(
   
   # =============================================================================================================================
   
-)
+) 
+  
